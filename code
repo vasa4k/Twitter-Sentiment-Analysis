@@ -1,0 +1,145 @@
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+plt.style.use('ggplot')
+from sklearn.metrics import roc_curve,auc
+from sklearn.metrics import classification_report,confusion_matrix
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from sklearn.model_selection import train_test_split
+from mlxtend.plotting import plot_confusion_matrix
+import matplotlib.cm as cm
+from matplotlib import rcParams
+from collections import Counter
+from nltk.tokenize import RegexpTokenizer
+import re
+import string
+from tensorflow.keras.layers import LSTM, Activation, Dense, Dropout, Input, Embedding
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import RMSprop
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing import sequence
+%matplotlib inline
+
+import warnings
+warnings.filterwarnings("ignore") 
+
+train = pd.read_csv(r"D:\Download\All Files & Datasets\tweet-sentiment-extraction\train.csv")
+ss = pd.read_csv(r"D:\Download\All Files & Datasets\tweet-sentiment-extraction\sample_submission.csv")
+test = pd.read_csv(r"D:\Download\All Files & Datasets\tweet-sentiment-extraction\test.csv")
+
+print(train.shape)
+print(test.shape)
+
+train.info()
+
+train.dropna(inplace=True)
+
+test.info()
+
+# EDA
+
+
+train.head()
+
+train.describe()
+
+temp = train.groupby('sentiment').count()['text'].reset_index().sort_values(by='text',ascending=False)
+temp.style.background_gradient(cmap='Purples')
+
+plt.figure(figsize=(12,6))
+sns.countplot(x='sentiment',data = train)
+
+from plotly import graph_objs as go
+fig = go.Figure(go.Funnelarea(text = temp.sentiment,values=temp.text))
+fig.show()
+
+def jaccard(str1,str2):
+    a = set(str1.lower().split()) 
+    b = set(str2.lower().split())
+    c = a.intersection(b)
+    return float(len(c)) / (len(a) + len(b) - len(c))
+results_jaccard=[]
+for ind,row in train.iterrows():
+    sentence1 = row.text
+    sentence2 = row.selected_text
+    jaccard_score = jaccard(sentence1,sentence2)
+    results_jaccard.append([sentence1,sentence2,jaccard_score])
+jaccard = pd.DataFrame(results_jaccard,columns=["text","selected_text","jaccard_score"])
+train = train.merge(jaccard,how='outer')
+train['Num_words_ST'] = train['selected_text'].apply(lambda x:len(str(x).split())) #Number Of words in Selected Text
+train['Num_word_text'] = train['text'].apply(lambda x:len(str(x).split())) #Number Of words in main text
+train['difference_in_words'] = train['Num_word_text'] - train['Num_words_ST']
+
+train.head()
+
+plt.figure(figsize=(12,6))
+p1=sns.kdeplot(train['Num_words_ST'], shade=True, color="r").set_title('Kernel Distribution of Number Of words')
+p1=sns.kdeplot(train['Num_word_text'], shade=True, color="b")
+
+def clean_text(text):
+    '''Make text lowercase, remove text in square brackets,remove links,remove punctuation
+    and remove words containing numbers.'''
+    text = str(text).lower()
+    text = re.sub('\[.*?\]', '', text)
+    text = re.sub('https?://\S+|www\.\S+', '', text)
+    text = re.sub('<.*?>+', '', text)
+    text = re.sub('[%s]' % re.escape(string.punctuation), '', text)
+    text = re.sub('\n', '', text)
+    text = re.sub('\w*\d\w*', '', text)
+    return text
+
+train['text'] = train['text'].apply(lambda x:clean_text(x))
+train['selected_text'] = train['selected_text'].apply(lambda x:clean_text(x))
+
+train.head()
+
+train['temp_list'] = train['selected_text'].apply(lambda x:str(x).split())
+top = Counter([item for sublist in train['temp_list'] for item in sublist])
+temp = pd.DataFrame(top.most_common(20))
+temp.columns = ['Common_words','count']
+temp.style.background_gradient(cmap='Blues')
+
+import nltk
+nltk.download('stopwords')
+def remove_stopword(x):
+    return [y for y in x if y not in stopwords.words('english')]
+train['temp_list'] = train['temp_list'].apply(lambda x:remove_stopword(x))
+
+top = Counter([item for sublist in train['temp_list'] for item in sublist])
+temp = pd.DataFrame(top.most_common(20))
+temp = temp.iloc[1:,:]
+temp.columns = ['Common_words','count']
+temp.style.background_gradient(cmap='Purples')
+
+train['temp_list1'] = train['text'].apply(lambda x:str(x).split()) #List of words in every row for text
+train['temp_list1'] = train['temp_list1'].apply(lambda x:remove_stopword(x))
+
+top = Counter([item for sublist in train['temp_list1'] for item in sublist])
+temp = pd.DataFrame(top.most_common(25))
+temp = temp.iloc[1:,:]
+temp.columns = ['Common_words','count']
+temp.style.background_gradient(cmap='Blues')
+
+Positive_sent = train[train['sentiment']=='positive']
+Negative_sent = train[train['sentiment']=='negative']
+Neutral_sent = train[train['sentiment']=='neutral']
+
+top = Counter([item for sublist in Positive_sent['temp_list'] for item in sublist])
+temp_positive = pd.DataFrame(top.most_common(20))
+temp_positive.columns = ['Common_words','count']
+temp_positive.style.background_gradient(cmap='Greens')
+
+top = Counter([item for sublist in Negative_sent['temp_list'] for item in sublist])
+temp_negative = pd.DataFrame(top.most_common(20))
+temp_negative = temp_negative.iloc[1:,:]
+temp_negative.columns = ['Common_words','count']
+temp_negative.style.background_gradient(cmap='Reds')
+
+top = Counter([item for sublist in Neutral_sent['temp_list'] for item in sublist])
+temp_neutral = pd.DataFrame(top.most_common(20))
+temp_neutral = temp_neutral.loc[1:,:]
+temp_neutral.columns = ['Common_words','count']
+temp_neutral.style.background_gradient(cmap='Reds')
